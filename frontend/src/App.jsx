@@ -11,11 +11,11 @@ function App() {
   // Fetch live stats and customer lists from our Node.js backend
   const fetchDashboardData = async () => {
     try {
-      const statsRes = await fetch('http://localhost:5000/api/stats');
+      const statsRes = await fetch('https://xeno-mini-crm-k8pv.onrender.com/api/stats');
       const statsData = await statsRes.json();
       setStats(statsData);
 
-      const custRes = await fetch('http://localhost:5000/api/customers');
+      const custRes = await fetch('https://xeno-mini-crm-k8pv.onrender.com/api/customers');
       const custData = await custRes.json();
       setCustomers(custData);
     } catch (err) {
@@ -38,7 +38,7 @@ function App() {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('http://localhost:5000/api/campaigns/send', {
+      const res = await fetch('https://xeno-mini-crm-k8pv.onrender.com/api/campaigns/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, channel }),
