@@ -1,14 +1,18 @@
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenAI } = require('@google/genai'); // Import the official Gemini SDK
+const { GoogleGenAI } = require('@google/genai');
 const customers = require('./dataset.json');
+
+// This explicitly initializes the system environment variables line lookup
+require('dotenv').config();
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// This tells the app to check Render's environment variables first, and fallback to a string if needed
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ' });
+// Flawless Multi-environment configuration fallback hook
+const apiKey = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ';
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 let campaignStats = {
   totalSent: 0,
