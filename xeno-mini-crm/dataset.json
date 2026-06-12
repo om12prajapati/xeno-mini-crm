@@ -1,0 +1,32 @@
+[
+  {
+    "id": "cust_001",
+    "name": "Arjun Sharma",
+    "email": "arjun@example.com",
+    "phone": "+919876543210",
+    "totalOrders": 5,
+    "totalSpent": 15000,
+    "lastOrderDaysAgo": 120,
+    "preferredCategory": "Apparel"
+  },
+  {
+    "id": "cust_002",
+    "name": "Priya Nair",
+    "email": "priya@example.com",
+    "phone": "+918765432109",
+    "totalOrders": 12,
+    "totalSpent": 45000,
+    "lastOrderDaysAgo": 15,
+    "preferredCategory": "Footwear"
+  },
+  {
+    "id": "cust_003",
+    "name": "Rohan Das",
+    "email": "rohan@example.com",
+    "phone": "+917654321098",
+    "totalOrders": 1,
+    "totalSpent": 2000,
+    "lastOrderDaysAgo": 210,
+    "preferredCategory": "Apparel"
+  }
+]
