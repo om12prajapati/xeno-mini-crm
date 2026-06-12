@@ -7,8 +7,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Initialize the Gemini client with your free key
-const ai = new GoogleGenAI({ apiKey: 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ' });
+// This tells the app to check Render's environment variables first, and fallback to a string if needed
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ' });
 
 let campaignStats = {
   totalSent: 0,
