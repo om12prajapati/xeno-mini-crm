@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenAI } = require('@google/genai'); // Kept if needed elsewhere
+const { GoogleGenAI: LegacyAI } = require('@google/generative-ai'); // Safe alternate import
 const customers = require('./dataset.json');
 
 require('dotenv').config();
@@ -10,138 +11,92 @@ app.use(express.json());
 app.use(cors());
 
 // =========================================================================
-// CRITICAL: PASTE YOUR ACTUAL GEMINI API KEY INSIDE THE SINGLE QUOTES BELOW!
-// Example: 'AIzaSyAz123...'
+// IMPORTANT: Paste your direct AIzaSy... key inside the single quotes below!
 // =========================================================================
-const MY_HARDCODED_KEY = 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ';
+const MY_FALLBACK_KEY = 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ'; 
 
-// Robust multi-environment API Key initialization block
-const apiKey = process.env.GEMINI_API_KEY || MY_HARDCODED_KEY;
-const ai = new GoogleGenAI({ apiKey: apiKey });
+const apiKey = process.env.GEMINI_API_KEY || MY_FALLBACK_KEY;
 
-let campaignStats = {
-  totalSent: 0,
-  delivered: 0,
-  opened: 0,
-  failed: 0
-};
+// Fallback initialization check to prevent auth wrapper mismatch crashes
+let aiInstance;
+try {
+  // Try initializing with the new SDK style wrapper
+  aiInstance = new GoogleGenAI({ apiKey: apiKey });
+} catch (e) {
+  // Absolute backup initialization using raw configuration strings
+  aiInstance = { models: { generateContent: async (opts) => {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: opts.model || "gemini-1.5-flash" });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: opts.contents + "\n" + opts.config.systemInstruction }] }]
+    });
+    return { text: result.response.text() };
+  }}};
+}
 
-// Endpoint 1: Fetch live statistics for dashboard polling counters
-app.get('/api/stats', (req, res) => {
-  res.json(campaignStats);
-});
+let campaignStats = { totalSent: 0, delivered: 0, opened: 0, failed: 0 };
 
-// Endpoint 2: Fetch full active directory customer database listings
-app.get('/api/customers', (req, res) => {
-  res.json(customers);
-});
+app.get('/api/stats', (req, res) => res.json(campaignStats));
+app.get('/api/customers', (req, res) => res.json(customers));
 
-// Endpoint 3: Process plain-text segments with Gemini and launch campaigns
 app.post('/api/campaigns/send', async (req, res) => {
   const { prompt, channel } = req.body;
-
-  if (!prompt) {
-    return res.status(400).json({ error: "Missing campaign segmentation prompt." });
-  }
+  if (!prompt) return res.status(400).json({ error: "Missing prompt." });
 
   try {
-    // Structured instruction prompt layout ensuring standard syntax outputs from Gemini
     const systemInstruction = `
-      You are an expert database engine assistant. 
-      Your single task is to translate natural language user segment rules into a raw JavaScript filter condition.
-      The shopper object variable name is 'c'.
-      Available properties on 'c':
-      - c.lastOrderDaysAgo (number)
-      - c.orders (number)
-      - c.totalSpent (number)
-      - c.preferredCategory (string)
-
-      CRITICAL RULES:
-      - Output ONLY the clean condition string.
-      - Never include backticks (\`\`\`), 'javascript', 'json', wrapping quotes, or punctuation marks.
-      - Example Input: "Find customers who haven't ordered in 90 days"
-      - Example Output: c.lastOrderDaysAgo > 90
+      You are a database query condition generator. 
+      Output ONLY a raw JavaScript filter condition where 'c' represents a customer object.
+      Properties on 'c': c.lastOrderDaysAgo (number), c.orders (number), c.totalSpent (number), c.preferredCategory (string).
+      Rules: No backticks, no 'javascript' blocks, no markdown quotes.
+      Example Input: "ordered over 90 days ago"
+      Example Output: c.lastOrderDaysAgo > 90
     `;
 
-    const aiResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+    // Uses a stable configuration interface mapping
+    const response = await aiInstance.models.generateContent({
+      model: 'gemini-1.5-flash',
       contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.1,
-      }
+      config: { systemInstruction: systemInstruction, temperature: 0.1 }
     });
 
-    const filterCondition = aiResponse.text.trim();
-    console.log(`[AI LOG] Generated Filter Condition: ${filterCondition}`);
+    const filterCondition = response.text.replace(/```javascript|```/g, '').trim();
+    console.log(`[AI LOG] Condition Evaluated: ${filterCondition}`);
 
-    // Safely evaluate condition across our local JSON array dataset tracking directory
-    let targetCustomers = [];
-    try {
-      const evaluationFunction = new Function('c', `return ${filterCondition};`);
-      targetCustomers = customers.filter(c => {
-        try {
-          return evaluationFunction(c);
-        } catch {
-          return false;
-        }
-      });
-    } catch (evalErr) {
-      console.error("[CRM LOG] Error parsing AI conditional string logic:", evalErr);
-      return res.status(500).json({ 
-        error: "AI generated an invalid query condition.", 
-        details: filterCondition 
-      });
-    }
+    const evaluationFunction = new Function('c', `return ${filterCondition};`);
+    const targetCustomers = customers.filter(c => {
+      try { return evaluationFunction(c); } catch { return false; }
+    });
 
     const recipientCount = targetCustomers.length;
-    
     if (recipientCount === 0) {
-      return res.json({ 
-        message: `AI evaluated rule condition: "${filterCondition}". However, 0 shoppers matched this rule criteria.` 
-      });
+      return res.json({ message: `Condition "${filterCondition}" found 0 matching customers.` });
     }
 
-    // Reset loop metrics to accept fresh task statistics
     campaignStats.totalSent += recipientCount;
 
-    // Trigger completely asynchronous mock channel loops mimicking production gateways
     targetCustomers.forEach(customer => {
-      // Step A: Simulate delivery processing delays 
       setTimeout(() => {
-        const isDelivered = Math.random() > 0.15; // 85% success benchmark allocation
-
+        const isDelivered = Math.random() > 0.15;
         if (isDelivered) {
           campaignStats.delivered += 1;
-          console.log(`[CRM LOG] Updated status for ${customer.id}: delivered via ${channel}`);
-
-          // Step B: Simulate subsequent opened rates if delivery went green
           setTimeout(() => {
-            const isOpened = Math.random() > 0.40; // 60% standard baseline open likelihood
-            if (isOpened) {
-              campaignStats.opened += 1;
-              console.log(`[CRM LOG] Updated status for ${customer.id}: opened`);
-            }
-          }, 2000);
-
+            if (Math.random() > 0.4) campaignStats.opened += 1;
+          }, 1000);
         } else {
           campaignStats.failed += 1;
-          console.log(`[CRM LOG] Updated status for ${customer.id}: failed message handoff`);
         }
-      }, 1500);
+      }, 1000);
     });
 
-    return res.json({
-      message: `AI generated segment condition: "${filterCondition}". Campaign launched successfully to ${recipientCount} shoppers!`
-    });
+    return res.json({ message: `AI Filtered successfully: "${filterCondition}". Sent to ${recipientCount} customers.` });
 
   } catch (error) {
-    console.error("AI Generation Error:", error);
+    console.error("AI Generation Error Detailed:", error);
     return res.status(500).json({ error: "Failed to process request with AI layer.", details: error.message });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`CRM backend server is live on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
