@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios'); // Secure HTTP runner
 const customers = require('./dataset.json');
 
 require('dotenv').config();
@@ -9,9 +10,9 @@ app.use(express.json());
 app.use(cors());
 
 // =========================================================================
-// CRITICAL STEP: Paste your direct AIzaSy... key inside the single quotes!
+// PASTE YOUR ACTUAL GEMINI API KEY INSIDE THE SINGLE QUOTES BELOW!
 // =========================================================================
-const MY_HARDCODED_KEY = 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ'; 
+const MY_HARDCODED_KEY = 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ';
 
 const apiKey = process.env.GEMINI_API_KEY || MY_HARDCODED_KEY;
 
@@ -25,16 +26,16 @@ let campaignStats = {
 app.get('/api/stats', (req, res) => res.json(campaignStats));
 app.get('/api/customers', (req, res) => res.json(customers));
 
-// Endpoint 3: Connects directly to Google's raw REST gateway via HTTP fetch
+// Endpoint 3: Connects straight to the raw Google REST endpoint bypassing client SDKs
 app.post('/api/campaigns/send', async (req, res) => {
   const { prompt, channel } = req.body;
 
   if (!prompt) {
-    return res.status(400).json({ error: "Missing campaign prompt." });
+    return res.status(400).json({ error: "Missing campaign segmentation prompt." });
   }
 
   try {
-    console.log(`[REST API] Contacting Google Endpoints for prompt: "${prompt}"`);
+    console.log(`[HTTP REST API] Handshaking directly with Google for prompt: "${prompt}"`);
 
     const systemInstruction = `
       You are an expert database engine assistant. 
@@ -49,37 +50,22 @@ app.post('/api/campaigns/send', async (req, res) => {
       - Example Output: c.lastOrderDaysAgo > 90
     `;
 
-    // Construct raw HTTP packet for Google's native Gemini v1beta gateway
-    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Pure public web API URL mapping
+    const googleEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-    const response = await fetch(googleUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: { temperature: 0.1 }
-      })
+    // Dispatch raw standard HTTP payload packet
+    const googleResponse = await axios.post(googleEndpoint, {
+      contents: [{ parts: [{ text: `${systemInstruction}\n\nUser Request: ${prompt}` }] }],
+      generationConfig: { temperature: 0.1 }
     });
 
-    const data = await response.json();
-
-    // Check if Google returned an internal API error block
-    if (data.error) {
-      console.error("[GOOGLE SERVER ERROR]:", data.error);
-      return res.status(data.error.code || 401).json({ 
-        error: `Google API Error: ${data.error.message}`,
-        status: data.error.status 
-      });
-    }
-
-    // Safely pull the text response out of the nested JSON structure
-    const rawAiText = data.candidates[0].content.parts[0].text;
+    // Extract raw string value out of the Google JSON response schema
+    const rawAiText = googleResponse.data.candidates[0].content.parts[0].text;
     const filterCondition = rawAiText.trim().replace(/```javascript|```/g, '').trim();
     
-    console.log(`[AI LOG] Live Gemini Filter Condition: ${filterCondition}`);
+    console.log(`[HTTP REST LOG] Clean Query Generated: ${filterCondition}`);
 
-    // Evaluate condition across database
+    // Dynamic compilation loop across local shopper list 
     let targetCustomers = [];
     try {
       const evaluationFunction = new Function('c', `return ${filterCondition};`);
@@ -87,18 +73,18 @@ app.post('/api/campaigns/send', async (req, res) => {
         try { return evaluationFunction(c); } catch { return false; }
       });
     } catch (evalErr) {
-      console.error("[CRM LOG] Condition evaluation compile crash:", evalErr);
-      return res.status(500).json({ error: "Gemini built an unstable syntax check string.", details: filterCondition });
+      console.error("[CRM LOG] Filter evaluation error:", evalErr);
+      return res.status(500).json({ error: "Gemini built an unstable code structure rule.", details: filterCondition });
     }
 
     const recipientCount = targetCustomers.length;
     if (recipientCount === 0) {
-      return res.json({ message: `Gemini calculated condition: "${filterCondition}". 0 shoppers matched this criteria.` });
+      return res.json({ message: `Gemini compiled rule condition: "${filterCondition}". 0 shoppers matched this.` });
     }
 
     campaignStats.totalSent += recipientCount;
 
-    // Asynchronous channel execution loop simulations
+    // Asynchronous channel simulator
     targetCustomers.forEach(customer => {
       setTimeout(() => {
         const isDelivered = Math.random() > 0.15;
@@ -118,10 +104,13 @@ app.post('/api/campaigns/send', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Fetch Execution Crash:", error);
-    return res.status(500).json({ error: "Failed to communicate with direct REST API pipeline.", details: error.message });
+    console.error("[AXIOS CRASH LOG] Complete details:", error.response ? error.response.data : error.message);
+    return res.status(500).json({ 
+      error: "Failed to communicate with direct REST API pipeline.", 
+      details: error.response ? error.response.data : error.message 
+    });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`CRM backend running via direct REST loop on port ${PORT}`));
+app.listen(PORT, () => console.log(`HTTP REST backend running smoothly on port ${PORT}`));
