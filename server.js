@@ -2,9 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const customers = require('./dataset.json');
 
+require('dotenv').config();
+
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// =========================================================================
+// CRITICAL STEP: Paste your direct AIzaSy... key inside the single quotes!
+// =========================================================================
+const MY_HARDCODED_KEY = 'AQ.Ab8RN6Kwczsk8QhAvQuJp_GCH6ubJJwew8bd-woovxEfpG1eRQ'; 
+
+const apiKey = process.env.GEMINI_API_KEY || MY_HARDCODED_KEY;
 
 let campaignStats = {
   totalSent: 0,
@@ -13,48 +22,64 @@ let campaignStats = {
   failed: 0
 };
 
-// Endpoint 1: Fetch live dashboard statistics
-app.get('/api/stats', (req, res) => {
-  res.json(campaignStats);
-});
+app.get('/api/stats', (req, res) => res.json(campaignStats));
+app.get('/api/customers', (req, res) => res.json(customers));
 
-// Endpoint 2: Fetch active customer list
-app.get('/api/customers', (req, res) => {
-  res.json(customers);
-});
-
-// Endpoint 3: Process text segments using our Local AI Simulation Core
+// Endpoint 3: Connects directly to Google's raw REST gateway via HTTP fetch
 app.post('/api/campaigns/send', async (req, res) => {
   const { prompt, channel } = req.body;
 
   if (!prompt) {
-    return res.status(400).json({ error: "Missing campaign segmentation prompt." });
+    return res.status(400).json({ error: "Missing campaign prompt." });
   }
 
   try {
-    console.log(`[LOCAL AI CORE] Processing prompt: "${prompt}"`);
-    
-    // Normalize prompt to map language intent directly to database fields
-    const text = prompt.toLowerCase();
-    let filterCondition = "";
+    console.log(`[REST API] Contacting Google Endpoints for prompt: "${prompt}"`);
 
-    // Exact pattern matcher replicating structural Gemini outputs
-    if (text.includes("90 days") || text.includes("90 दिन")) {
-      filterCondition = "c.lastOrderDaysAgo > 90";
-    } else if (text.includes("30 days") || text.includes("30 दिन")) {
-      filterCondition = "c.lastOrderDaysAgo > 30";
-    } else if (text.includes("apparel") || text.includes("कपड़े")) {
-      filterCondition = "c.preferredCategory === 'Apparel'";
-    } else if (text.includes("spent") || text.includes("orders")) {
-      filterCondition = "c.totalSpent > 5000";
-    } else {
-      // Smart baseline fallback condition
-      filterCondition = "c.lastOrderDaysAgo >= 0";
+    const systemInstruction = `
+      You are an expert database engine assistant. 
+      Your single task is to translate natural language user segment rules into a raw JavaScript filter condition.
+      The shopper object variable name is 'c'.
+      Available properties on 'c': c.lastOrderDaysAgo (number), c.orders (number), c.totalSpent (number), c.preferredCategory (string).
+
+      CRITICAL RULES:
+      - Output ONLY the clean condition string.
+      - Never include backticks (\`\`\`), 'javascript', wrapping quotes, or punctuation marks.
+      - Example Input: "Find customers who haven't ordered in 90 days"
+      - Example Output: c.lastOrderDaysAgo > 90
+    `;
+
+    // Construct raw HTTP packet for Google's native Gemini v1beta gateway
+    const googleUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const response = await fetch(googleUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        generationConfig: { temperature: 0.1 }
+      })
+    });
+
+    const data = await response.json();
+
+    // Check if Google returned an internal API error block
+    if (data.error) {
+      console.error("[GOOGLE SERVER ERROR]:", data.error);
+      return res.status(data.error.code || 401).json({ 
+        error: `Google API Error: ${data.error.message}`,
+        status: data.error.status 
+      });
     }
 
-    console.log(`[LOCAL AI CORE] Evaluated Filter Condition: ${filterCondition}`);
+    // Safely pull the text response out of the nested JSON structure
+    const rawAiText = data.candidates[0].content.parts[0].text;
+    const filterCondition = rawAiText.trim().replace(/```javascript|```/g, '').trim();
+    
+    console.log(`[AI LOG] Live Gemini Filter Condition: ${filterCondition}`);
 
-    // Evaluate condition safely against dataset array
+    // Evaluate condition across database
     let targetCustomers = [];
     try {
       const evaluationFunction = new Function('c', `return ${filterCondition};`);
@@ -62,57 +87,41 @@ app.post('/api/campaigns/send', async (req, res) => {
         try { return evaluationFunction(c); } catch { return false; }
       });
     } catch (evalErr) {
-      console.error("[CRM LOG] Error parsing conditional string:", evalErr);
-      return res.status(500).json({ error: "Local AI layer generated an invalid runtime query." });
+      console.error("[CRM LOG] Condition evaluation compile crash:", evalErr);
+      return res.status(500).json({ error: "Gemini built an unstable syntax check string.", details: filterCondition });
     }
 
     const recipientCount = targetCustomers.length;
     if (recipientCount === 0) {
-      return res.json({ 
-        message: `Local AI Core evaluated condition: "${filterCondition}". 0 shoppers matched this rule criteria.` 
-      });
+      return res.json({ message: `Gemini calculated condition: "${filterCondition}". 0 shoppers matched this criteria.` });
     }
 
-    // Tick up statistics counters immediately
     campaignStats.totalSent += recipientCount;
 
-    // Trigger asynchronous delivery pipeline simulation loops
+    // Asynchronous channel execution loop simulations
     targetCustomers.forEach(customer => {
-      // Step A: Simulate delivery latency network delays
       setTimeout(() => {
-        const isDelivered = Math.random() > 0.15; // 85% delivery success rule
-
+        const isDelivered = Math.random() > 0.15;
         if (isDelivered) {
           campaignStats.delivered += 1;
-          console.log(`[CRM LOG] Message delivered to ${customer.name} via ${channel}`);
-
-          // Step B: Simulate reading engagement metrics hook
           setTimeout(() => {
-            const isOpened = Math.random() > 0.40; // 60% open chance
-            if (isOpened) {
-              campaignStats.opened += 1;
-              console.log(`[CRM LOG] Campaign tracking update: Message opened by ${customer.name}`);
-            }
+            if (Math.random() > 0.40) campaignStats.opened += 1;
           }, 2000);
-
         } else {
           campaignStats.failed += 1;
-          console.log(`[CRM LOG] Message delivery failed for ${customer.name}`);
         }
       }, 1500);
     });
 
     return res.json({
-      message: `AI-Native Parser generated condition: "${filterCondition}". Campaign launched successfully to ${recipientCount} shoppers!`
+      message: `AI generated segment condition: "${filterCondition}". Campaign launched successfully to ${recipientCount} shoppers!`
     });
 
   } catch (error) {
-    console.error("Critical Exception Handler Error:", error);
-    return res.status(500).json({ error: "Failed to process request with AI layer.", details: error.message });
+    console.error("Fetch Execution Crash:", error);
+    return res.status(500).json({ error: "Failed to communicate with direct REST API pipeline.", details: error.message });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`CRM production backend server is live on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`CRM backend running via direct REST loop on port ${PORT}`));
